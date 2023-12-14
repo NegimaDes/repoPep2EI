@@ -1,0 +1,233 @@
+---
+title: "EP08"
+author: "Grupo 1"
+date: "2023-11-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Equipo 1: Ejercicio 8
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(readxl)
+library(dplyr)
+library(boot)
+library(simpleboot)
+library(WRS2)
+```
+
+## Obtención de datos:
+
+- Obtener los datos, disponibles en el archivo "EP08 Datos CASEN 2017.csv", desde el directorio compartido correspondiente.
+
+```{r}
+datos <- read.csv2("EP08 Datos CASEN 2017.csv", sep = ";", fileEncoding = "latin1")
+datos[["edad"]] <- as.numeric(datos[["edad"]])
+```
+
+## Planteamiento de Preguntas:
+
+- Familiarizarse con los datos entregados y proponer una pregunta de investigación interesante (= no trivial) de acuerdo a lo solicitado en el enunciado de cada pregunta.
+
+
+## 1. Propongan una pregunta de investigación original, que involucre la comparación de una frecuencia de un evento o característica en dos grupos independientes. Fijando una semilla propia, seleccionen una muestra aleatoria de hogares (100 < n < 150) y respondan la pregunta propuesta utilizando el método Monte Carlo.
+
+#### Pregunta de Investigación: La cantidad de personas mayores de 60 (edad) que tienen educación media científico humanista completada, ¿es similar dentro y fuera de la región metropolitana (región)?
+
+```{r}
+# Filtrado de las personas mayores a 60 años
+datos1 <- filter(datos, edad > 59)
+
+datos1 <- select(datos1, region, edad, e6a)
+
+datos1 <- filter(datos1, region == "Región Metropolitana de Santiago" |
+                   region == "Región del Biobío")
+
+# nrow(datos1)
+
+set.seed(5123)
+muestra <- datos1[sample(nrow(datos1), 150), ]
+
+muestraBio <- filter(muestra, region == "Región del Biobío")
+muestraSan <- filter(muestra, region == "Región Metropolitana de Santiago")
+
+# hipótesis
+
+# H0: La proporción de personas sobre los 60 con estudios de educación media Científico-Humanista es igual en la Región Metropolitana y la Región del Bío-Bío
+# Ha: La proporción de personas sobre los 60 con estudios de educación media Científico-Humanista es distinta en la Región Metropolitana y la Región del Bío-Bío
+
+# muestras
+bio_col <- muestraBio$e6a
+san_col <- muestraSan$e6a
+
+# Convierte a numérico: "Educación Media Científico-Humanista" será 1, otro caso será 0
+bio_num <- as.numeric(bio_col == "Educación Media Científico-Humanista")
+san_num <- as.numeric(san_col == "Educación Media Científico-Humanista")
+
+# permutaciones
+
+obtiene_permutacion <- function(i, muestra_1, muestra_2) {
+  n_1 <- length(muestra_1)
+  combinada <- c(muestra_1, muestra_2)
+  n <- length(combinada)
+  permutacion <- sample(combinada, n, replace = FALSE)
+  nueva_1 <- permutacion[1:n_1]
+  nueva_2 <- permutacion[(n_1 + 1):n]
+  return(list(nueva_1, nueva_2))
+}
+
+calcular_valor_p <- function(distribucion, valor_observado, repeticiones) {
+  numerador <- sum(abs(distribucion) > abs(valor_observado)) + 1
+  denominador <- repeticiones + 1
+  valor_p <- numerador / denominador
+}
+
+# Generar permutaciones .
+permutaciones <- lapply(1:3999, obtiene_permutacion, bio_num, san_num)
+
+diferencias_de_proporciones <- sapply(permutaciones, function(permutacion) {
+  nueva_1 <- permutacion[[1]]
+  nueva_2 <- permutacion[[2]]
+  prop_1 <- sum(nueva_1) / length(nueva_1)
+  prop_2 <- sum(nueva_2) / length(nueva_2)
+  return(prop_1 - prop_2)
+})
+
+observaciones <- data.frame(diferencias_de_proporciones)
+g <- gghistogram(observaciones, x = "diferencias_de_proporciones", bins = 30, fill = "blue")
+g
+
+prop_obs1 <- sum(bio_num) / length(bio_num)
+prop_obs2 <- sum(san_num) / length(san_num)
+prop_obs <- prop_obs1 - prop_obs2
+
+p_value <- calcular_valor_p(observaciones, prop_obs, 3999)
+p_value
+```
+
+Con un p-value del método Monte Carlo de 0.4635, se puede concluir con un 95% de confianza que la proporción de personas sobre los 60 con estudios de educación media Científico-Humanista es igual en la Región Metropolitana y la Región del Bío-Bío
+
+## 2. Propongan una pregunta de investigación original, que involucre la comparación de las medias de más de dos grupos independientes. Fijando una semilla distinta a la anterior, seleccionen una muestra aleatoria de hogares (200 < n < 300) y respondan la pregunta propuesta utilizando bootstrapping. Solo por ejercicio académico, aplique un análisis post-hoc con bootstrapping aunque este no fuera necesario.
+
+
+#### Pregunta de investigación: Basándonos en los datos de la encuesta Casen 2017 y considerando una muestra de 250 viviendas, y un nivel de significancia de 0.05, ¿es similar el promedio de hijos nacidos vivos (s4) en casas donde está presente un estado civil de casado, viudo, soltero (ecivil)? 
+
+#### Datos:
+
+- Obtención de la muestra
+
+```{r}
+# Filtro los datos
+datos2 <- filter(datos, ecivil == "Soltero(a)" | ecivil == "Casado(a)" | ecivil == "Viudo(a)")
+
+# Muestra
+muestra2 <- datos2[sample(nrow(datos2), 250), ]
+
+muestra2_soltero <- filter(muestra2, ecivil == "Soltero(a)")
+muestra2_casado <- filter(muestra2, ecivil == "Casado(a)")
+muestra2_viudo <- filter(muestra2, ecivil == "Viudo(a)")
+
+# Seleccionar solo las columnas ecivil y s4 de la muestra
+datos2_subset <- select(muestra2, ecivil, s4)
+```
+
+
+- Comportamiento de los datos en gráficos:
+
+Realizo prueba de normalidad con shapiro.test:
+
+```{r}
+# Realizo prueba de normalidad
+print(shapiro.test(muestra2_soltero$s4))
+print(shapiro.test(muestra2_casado$s4))
+print(shapiro.test(muestra2_viudo$s4))
+```
+
+Hago los gráficos Q-Q plot de la cantidad de hijos de los hogares con cada uno de los 3 estados civiles seleccionados (soltero(a), casado(a), viudo(a))
+
+```{r}
+# Realizo gráficos qqplot
+par(mfrow = c(1, 3))  # Ventana para mostrar los 3 gráficos
+
+# Soltero(a)
+qqnorm(muestra2_soltero$s4, main = "QQ Plot - Soltero(a)", col = "blue")
+qqline(muestra2_soltero$s4, col = "red")
+
+# Casado(a)
+qqnorm(muestra2_casado$s4, main = "QQ Plot - Casado(a)", col = "green")
+qqline(muestra2_casado$s4, col = "red")
+
+# Viudo(a)
+qqnorm(muestra2_viudo$s4, main = "QQ Plot - Viudo(a)", col = "purple")
+qqline(muestra2_viudo$s4, col = "red")
+
+par(mfrow = c(1, 1))
+```
+
+Como se ve en los gráficos Q-Q plot, y en los p-value retornados en cada prueba de shapiro.test para los 3 civiles, como cada p-value es menor a 0.05, se comprueba que los nacimientos de hijos nacidos vivos no siguen una distribución normal en casas con estado civil casado, viudo y soltero, por lo que se utilizarán métodos para datos problemáticos, en específico bootstrapping para la prueba de hipótesis
+
+
+#### Formulación de hipótesis:
+
+<br>
+
+Hipótesis en lenguaje natural:
+
+- Hipótesis Nula: es similar, en promedio, la cantidad de hijos nacidos vivos en casas con estado civil de casado, viudo, soltero
+
+- Hipótesis Alternativa: es diferente, en promedio, la cantidad de hijos nacidos vivos en casas con estado civil de casado, viudo, soltero
+
+<br>
+
+Hipótesis en lenguaje matemático (donde cada media representa a la cantidad de hijos nacidos vivos):
+
+$$
+H_0: \mu_{casado} = \mu_{viudo} = \mu_{soltero}
+$$
+
+$$ H_a: \mu_{casado} \neq \mu_{viudo} \vee \mu_{casado} \neq \mu_{soltero} \vee  \mu_{viudo} \neq \mu_{soltero} $$
+
+#### Estadístico de interés:
+
+En este caso, el estadístico de interés a analizar es la media, porque se quiere analizar la cantidad media de los hijos nacidos vivos por cada uno de los 3 estados civiles previamente mencionados
+
+
+#### Remuestreo y procedimiento de la prueba:
+
+```{r}
+muestras <- 999
+
+set.seed(250)
+
+bootstrap <- t1waybt(s4 ~ ecivil, data = datos2_subset, tr = 0.2, nboot = muestras)
+
+bootstrap
+```
+
+#### Conclusión:
+
+Al tener un p-value menor a la significancia (0.05), se rechaza la hipótesis nula en favor de la alternativa, entonces se concluye que la cantidad de hijos media no es igual para los hogares con estado civil casado, soltero, viudo
+
+Y al rechazar la hipótesis nula, se va a requerir un procedimiento post-hoc, para analizar en que tipo de hogar (según su estado civil), hay más diferencia con el resto
+
+```{r}
+# Procedimiento post-hoc
+set.seed(250)
+
+post_hoc <- mcppb20(s4 ~ ecivil, data = datos2_subset, tr = 0.2, nboot = muestras)
+
+print(post_hoc)
+```
+
+Se observa, finalmente, que hay diferencia en la cantidad de hijos nacidos vivos para cada par de tipo de casa por estado civil, aunque se analiza que entre casado y viudo hay un p-value mayor al resto (0.04), pero aún sigue siendo menor al nivel de significancia (0.05)
+
+En el caso de considerar una significancia más pequeña (como 0.01), se podría afirmar con un 99% de confiabilidad que los hogares con estado civil soltero, tienen diferencia significativa con el resto de tipos de hogar en torno a la cantidad de hijos nacidos
+
+Pero con una significancia de 0.05, los 3 grupos presentan una cantidad de hijos nacidos vivos diferente entre sí
+
+
